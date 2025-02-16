@@ -53,24 +53,21 @@ data "aws_vpc" "this" {
 
 data "aws_subnets" "this" {
   filter {
-    name = "vpc-id"
-    values = [ data.aws_vpc.this.id ]
+    name   = "vpc-id"
+    values = [data.aws_vpc.this.id]
   }
 }
 
-module "ec2" {
-  source  = "terraform-aws-modules/ec2-instance/aws"
-  version = "~> 5.7.1"
-
-  name                        = "wireguard"
+resource "aws_instance" "this" {
   ami                         = data.aws_ami.this.id
   associate_public_ip_address = true
   instance_type               = "t2.micro"
+  key_name                    = aws_key_pair.this.id
 
   subnet_id              = data.aws_subnets.this.ids[0]
-  tenancy                = "default"
   vpc_security_group_ids = [aws_security_group.this.id]
-  key_name               = aws_key_pair.this.id
 
   user_data = templatefile("./resources/user_data.tftpl", { port = local.isg.wg.port })
+
+  tags = { Name = "wireguard" }
 }
