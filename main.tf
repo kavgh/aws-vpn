@@ -67,7 +67,7 @@ resource "aws_instance" "this" {
   subnet_id              = data.aws_subnets.this.ids[0]
   vpc_security_group_ids = [aws_security_group.this.id]
 
-  user_data = templatefile("./resources/user_data.tftpl", { port = local.isg.wg.port })
+  user_data = file("./resources/user_data.sh")
 
   tags = { Name = "wireguard" }
 }
