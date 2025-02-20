@@ -1,12 +1,16 @@
 #!/usr/bin/bash
 
+NETWORK="10.213.56"
+REV_NETWORK="56.213.10"
+MASK=29
+
 prereq() {
     sudo apt-get update && sudo apt-get install -y wireguard bind9
     sudo sed -i '/net.ipv4.ip_forward=1/s/#//' /etc/sysctl.conf && sudo sysctl -p
 }
 
 chmod() {
-    sudo chmod 600 $1 $2 $3
+    sudo chmod 600 $1 $2 $3 $4
 }
 
 configuration() {
@@ -17,21 +21,21 @@ configuration() {
     SERVER_PUB=$(sudo cat /etc/wireguard/server_pub.key)
     PUBLIC_IP=$(dig +short myip.opendns.com @resolver1.opendns.com)
 
-    chmod "/etc/wireguard/server_priv.key" "/etc/wireguard/server_pub.key"
-
     cat <<-EOF | sudo tee /etc/wireguard/wg0.conf
 [Interface]
-Address = 10.10.10.1/29
+Address = $NETWORK.1/$MASK
 ListenPort = 51820
 PrivateKey = $SERVER_PRIV
-PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o enX0 -j MASQUERADE; iptables -I INPUT -p tcp --dport 22 -j ACCEPT
-PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o enX0 -j MASQUERADE; iptables -D INPUT -p tcp --dport 22 -j ACCEPT
-DNS = 10.10.10.1
+PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o enX0 -j ACCEPT; iptables -t nat -A POSTROUTING -o enX0 -j MASQUERADE#; iptables -I INPUT -p tcp --dport 22 -j ACCEPT
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o enX0 -j ACCEPT; iptables -t nat -D POSTROUTING -o enX0 -j MASQUERADE#; iptables -D INPUT -p tcp --dport 22 -j ACCEPT
+DNS = $NETWORK.1
 
 #### Create NAT table in order to forward traffic to public internet
 # -A FORWARD: The FORWARD chain is used for packets that are being routed through the server (i.e., packets that aren't intended for the server itself but are passing through to other devices).
 # -A POSTROUTING: This appends the rule to the POSTROUTING chain in the nat table. The POSTROUTING chain handles packets that are leaving the server (after they’ve been routed, but before they go out to the network).
 EOF
+
+    chmod "/etc/wireguard/server_priv.key" "/etc/wireguard/server_pub.key" "/etc/wireguard/wg0.conf"
 
     index=2
     local web_index
@@ -40,17 +44,15 @@ EOF
         wg genkey | sudo tee /etc/wireguard/peer_${peer}_priv.key | wg pubkey | sudo tee /etc/wireguard/peer_${peer}_pub.key
         wg genpsk | sudo tee /etc/wireguard/peer_${peer}_psk.key
 
-        chmod "/etc/wireguard/peer_${peer}_priv.key" "/etc/wireguard/peer_${peer}_pub.key" "/etc/wireguard/peer_${peer}_psk.key"
-
         PEER_PUB=$(sudo cat /etc/wireguard/peer_${peer}_pub.key)
         PEER_PSK=$(sudo cat /etc/wireguard/peer_${peer}_psk.key)
         PEER_PRIV=$(sudo cat /etc/wireguard/peer_${peer}_priv.key)
 
         cat <<-EOF | sudo tee /etc/wireguard/peer_${peer}.conf
 [Interface]
-Address = 10.10.10.$index/29
+Address = $NETWORK.$index/$MASK
 PrivateKey = $PEER_PRIV
-DNS = 10.10.10.1
+DNS = $NETWORK.1
 
 [Peer]
 PublicKey = $SERVER_PUB
@@ -65,8 +67,10 @@ EOF
 ### peer_${peer} ###
 PublicKey = $PEER_PUB
 PresharedKey = $PEER_PSK
-AllowedIPs = 0.0.0.0/0
+AllowedIPs = $NETWORK.$index/32
 EOF
+
+        chmod "/etc/wireguard/peer_${peer}_priv.key" "/etc/wireguard/peer_${peer}_pub.key" "/etc/wireguard/peer_${peer}_psk.key" "/etc/wireguard/peer_${peer}.conf"
 
         [[ $peer == "web" ]] && web_index=$index
 
@@ -86,8 +90,8 @@ EOF
         IN      NS      ns.local.test.
 
 ; Records
-        IN      A       10.10.10.$web_index
-ns      IN      A       10.10.10.1
+        IN      A       $NETWORK.$web_index
+ns      IN      A       $NETWORK.1
 
 ; CNAME
 www     IN      CNAME   local.test.
@@ -112,7 +116,7 @@ EOF
 
     cat <<EOF | sudo tee /etc/bind/named.conf.options
 // ACL names
-acl vpn-network { 10.10.10.0/29; };
+acl vpn-network { $NETWORK.0/$MASK; };
 options {
     directory "/var/cache/bind";
     
@@ -137,7 +141,7 @@ options {
     dnssec-validation auto;
 
     // You don't have to specify port for default 53
-    listen-on port 53 { 10.10.10.1; };
+    listen-on port 53 { $NETWORK.1; };
 
     // Defines range of IP addresses from which the server will process requests:
     allow-query { vpn-network; };
@@ -169,7 +173,7 @@ zone "local.test" {
     file "/etc/bind/db.local.test";
 };
 
-zone "29-10.10.10.in-addr.arpa" {
+zone "$MASK-$REV_NETWORK.in-addr.arpa" {
     type master;
     file "/etc/bind/db.local.test.arpa";
 };
@@ -179,8 +183,8 @@ EOF
 initiation() {
     sudo systemctl stop named.service
     sudo systemctl stop wg-quick@wg0.service
-    #sudo systemctl enable --now wg-quick@wg0
-    #sudo systemctl restart named.service
+    sudo systemctl enable --now wg-quick@wg0
+    sudo systemctl restart named.service
 }
 
 prereq
