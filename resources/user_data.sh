@@ -26,8 +26,8 @@ configuration() {
 Address = $NETWORK.1/$MASK
 ListenPort = 51820
 PrivateKey = $SERVER_PRIV
-PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o enX0 -j ACCEPT; iptables -t nat -A POSTROUTING -o enX0 -j MASQUERADE#; iptables -I INPUT -p tcp --dport 22 -j ACCEPT
-PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o enX0 -j ACCEPT; iptables -t nat -D POSTROUTING -o enX0 -j MASQUERADE#; iptables -D INPUT -p tcp --dport 22 -j ACCEPT
+PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o enX0 -j ACCEPT; iptables -t nat -A POSTROUTING -o enX0 -j MASQUERADE
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o enX0 -j ACCEPT; iptables -t nat -D POSTROUTING -o enX0 -j MASQUERADE
 DNS = $NETWORK.1
 
 #### Create NAT table in order to forward traffic to public internet
@@ -72,7 +72,7 @@ EOF
 
         chmod "/etc/wireguard/peer_${peer}_priv.key" "/etc/wireguard/peer_${peer}_pub.key" "/etc/wireguard/peer_${peer}_psk.key" "/etc/wireguard/peer_${peer}.conf"
 
-        [[ $peer == "web" ]] && web_index=$index
+        [[ $peer == "gitlab" ]] && web_index=$index
 
         (( index++ ))
     done
@@ -94,7 +94,9 @@ EOF
 ns      IN      A       $NETWORK.1
 
 ; CNAME
-www     IN      CNAME   local.test.
+www         IN  CNAME   local.test.
+gitlab      IN  CNAME   local.test.
+www.gitlab  IN  CNAME   local.test.
 EOF
 
     cat <<EOF | sudo tee /etc/bind/db.local.test.arpa
@@ -110,7 +112,7 @@ EOF
         IN      NS      ns.local.test.
 
 ; Resolve IP address to FQDN Pointers (PTR)
-$web_index       IN      PTR     www.local.test.
+$web_index       IN      PTR     local.test.
 1       IN      PTR     ns.local.test.
 EOF
 
@@ -181,12 +183,10 @@ EOF
 }
 
 initiation() {
-    sudo systemctl stop named.service
-    sudo systemctl stop wg-quick@wg0.service
-    sudo systemctl enable --now wg-quick@wg0
     sudo systemctl restart named.service
+    
 }
 
 prereq
-configuration "phone" "docker" "web"
+configuration "phone" "docker" "gitlab"
 initiation
