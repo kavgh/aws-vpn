@@ -38,7 +38,7 @@ EOF
     chmod "/etc/wireguard/server_priv.key" "/etc/wireguard/server_pub.key" "/etc/wireguard/wg0.conf"
 
     index=2
-    local web_index
+    gitlab web_index
 
     for peer in "${peers[@]}"; do
         wg genkey | sudo tee /etc/wireguard/peer_${peer}_priv.key | wg pubkey | sudo tee /etc/wireguard/peer_${peer}_pub.key
@@ -77,9 +77,9 @@ EOF
         (( index++ ))
     done
 
-    cat <<EOF | sudo tee /etc/bind/db.local.test
+    cat <<EOF | sudo tee /etc/bind/db.vpn.test
 \$TTL 86400
-@       IN      SOA     ns.local.test.  hostmaster.local.test. (
+@       IN      SOA     ns.vpn.test.  hostmaster.vpn.test. (
                         2025021801  ; version
                         86400       ; refresh
                         7200        ; retry
@@ -87,21 +87,20 @@ EOF
                         86400 )     ; minimum TTL
 
 ; Nameservers
-        IN      NS      ns.local.test.
+        IN      NS      ns.vpn.test.
 
 ; Records
         IN      A       $NETWORK.$web_index
 ns      IN      A       $NETWORK.1
 
 ; CNAME
-www         IN  CNAME   local.test.
-gitlab      IN  CNAME   local.test.
-www.gitlab  IN  CNAME   local.test.
+gitlab      IN  CNAME   vpn.test.
+www.gitlab  IN  CNAME   vpn.test.
 EOF
 
-    cat <<EOF | sudo tee /etc/bind/db.local.test.arpa
+    cat <<EOF | sudo tee /etc/bind/db.vpn.test.arpa
 \$TTL 86400
-@       IN      SOA     ns.local.test.  hostmaster.local.test. (
+@       IN      SOA     ns.vpn.test.  hostmaster.vpn.test. (
                         2025021801  ; version
                         86400       ; refresh
                         7200        ; retry
@@ -109,11 +108,11 @@ EOF
                         86400 )     ; minimum TTL
 
 ; Namerservers
-        IN      NS      ns.local.test.
+        IN      NS      ns.vpn.test.
 
 ; Resolve IP address to FQDN Pointers (PTR)
-$web_index       IN      PTR     local.test.
-1       IN      PTR     ns.local.test.
+$web_index       IN      PTR     vpn.test.
+1       IN      PTR     ns.vpn.test.
 EOF
 
     cat <<EOF | sudo tee /etc/bind/named.conf.options
@@ -170,21 +169,21 @@ EOF
 // organization
 //include "/etc/bind/zones.rfc1918";
 
-zone "local.test" {
+zone "vpn.test" {
     type master;
-    file "/etc/bind/db.local.test";
+    file "/etc/bind/db.vpn.test";
 };
 
 zone "$MASK-$REV_NETWORK.in-addr.arpa" {
     type master;
-    file "/etc/bind/db.local.test.arpa";
+    file "/etc/bind/db.vpn.test.arpa";
 };
 EOF
 }
 
 initiation() {
     sudo systemctl restart named.service
-    
+    sudo systemctl enable --now wg-quick@wg0
 }
 
 prereq
