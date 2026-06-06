@@ -203,11 +203,12 @@ EOF
 }
 
 initiation() {
-    sudo systemctl restart named.service
-    sudo systemctl enable --now wg-quick@wg0
+    systemctl restart named.service
+    systemctl enable --now wg-quick@wg0
+    systemctl restart wg-quick@wg0.service
 }
 
 is_sudo
 prereq
-configuration "1" "2"
+configuration "1" "2" "3"
 initiation
