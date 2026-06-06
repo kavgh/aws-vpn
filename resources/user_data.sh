@@ -16,24 +16,30 @@ chmod() {
 configuration() {
     declare -a peers=("$@")
 
-    wg genkey | sudo tee /etc/wireguard/server_priv.key | wg pubkey | sudo tee /etc/wireguard/server_pub.key
+    if [[ ! -f "/etc/wireguard/server_priv.key" && ! -f "/etc/wireguard/server_pub.key" ]]
+    then
+        wg genkey | sudo tee /etc/wireguard/server_priv.key | wg pubkey | sudo tee /etc/wireguard/server_pub.key
+    fi
     SERVER_PRIV=$(sudo cat /etc/wireguard/server_priv.key)
     SERVER_PUB=$(sudo cat /etc/wireguard/server_pub.key)
     PUBLIC_IP=$(dig +short myip.opendns.com @resolver1.opendns.com)
 
-    cat <<-EOF | sudo tee /etc/wireguard/wg0.conf
+    if [[ ! -f "/etc/wireguard/wg0.conf" ]]
+    then
+        cat <<-EOF | sudo tee /etc/wireguard/wg0.conf
 [Interface]
 Address = $NETWORK.1/$MASK
 ListenPort = 51820
 PrivateKey = $SERVER_PRIV
-PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o enX0 -j ACCEPT; iptables -t nat -A POSTROUTING -o enX0 -j MASQUERADE
-PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o enX0 -j ACCEPT; iptables -t nat -D POSTROUTING -o enX0 -j MASQUERADE
+PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o $(ip route | awk 'NR=1 { print $5; exit}') -j ACCEPT; iptables -t nat -A POSTROUTING -o $(ip route | awk 'NR=1 { print $5; exit}') -j MASQUERADE
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o $(ip route | awk 'NR=1 { print $5; exit}') -j ACCEPT; iptables -t nat -D POSTROUTING -o $(ip route | awk 'NR=1 { print $5; exit}') -j MASQUERADE
 DNS = $NETWORK.1
 
 #### Create NAT table in order to forward traffic to public internet
 # -A FORWARD: The FORWARD chain is used for packets that are being routed through the server (i.e., packets that aren't intended for the server itself but are passing through to other devices).
 # -A POSTROUTING: This appends the rule to the POSTROUTING chain in the nat table. The POSTROUTING chain handles packets that are leaving the server (after they’ve been routed, but before they go out to the network).
 EOF
+    fi
 
     chmod "/etc/wireguard/server_priv.key" "/etc/wireguard/server_pub.key" "/etc/wireguard/wg0.conf"
 
@@ -41,14 +47,19 @@ EOF
     gitlab web_index
 
     for peer in "${peers[@]}"; do
-        wg genkey | sudo tee /etc/wireguard/peer_${peer}_priv.key | wg pubkey | sudo tee /etc/wireguard/peer_${peer}_pub.key
-        wg genpsk | sudo tee /etc/wireguard/peer_${peer}_psk.key
+	if [[ ! -f "/etc/wireguard/peer_${peer}_priv.key" && ! -f "/etc/wireguard/peer_${peer}_pub.key" && ! -f "/etc/wireguard/peer_${peer}_psk.key" ]]
+	then
+            wg genkey | sudo tee /etc/wireguard/peer_${peer}_priv.key | wg pubkey | sudo tee /etc/wireguard/peer_${peer}_pub.key
+            wg genpsk | sudo tee /etc/wireguard/peer_${peer}_psk.key
+	fi
 
         PEER_PUB=$(sudo cat /etc/wireguard/peer_${peer}_pub.key)
         PEER_PSK=$(sudo cat /etc/wireguard/peer_${peer}_psk.key)
         PEER_PRIV=$(sudo cat /etc/wireguard/peer_${peer}_priv.key)
 
-        cat <<-EOF | sudo tee /etc/wireguard/peer_${peer}.conf
+	if [[ ! -f "/etc/wireguard/peer_${peer}.conf" ]]
+	then
+            cat <<-EOF | sudo tee /etc/wireguard/peer_${peer}.conf
 [Interface]
 Address = $NETWORK.$index/$MASK
 PrivateKey = $PEER_PRIV
@@ -59,9 +70,8 @@ PublicKey = $SERVER_PUB
 PresharedKey = $PEER_PSK
 Endpoint = $PUBLIC_IP:51820
 AllowedIPs = 0.0.0.0/0
-PersistentKeepalive = 25
 EOF
-        cat <<-EOF | sudo tee -a /etc/wireguard/wg0.conf
+            cat <<-EOF | sudo tee -a /etc/wireguard/wg0.conf
 
 [Peer]
 ### peer_${peer} ###
@@ -69,6 +79,7 @@ PublicKey = $PEER_PUB
 PresharedKey = $PEER_PSK
 AllowedIPs = $NETWORK.$index/32
 EOF
+	fi
 
         chmod "/etc/wireguard/peer_${peer}_priv.key" "/etc/wireguard/peer_${peer}_pub.key" "/etc/wireguard/peer_${peer}_psk.key" "/etc/wireguard/peer_${peer}.conf"
 
@@ -77,45 +88,47 @@ EOF
         (( index++ ))
     done
 
-    cat <<EOF | sudo tee /etc/bind/db.vpn.test
-\$TTL 86400
-@       IN      SOA     ns.vpn.test.  hostmaster.vpn.test. (
-                        2025021801  ; version
-                        86400       ; refresh
-                        7200        ; retry
-                        3600000     ; expire
-                        86400 )     ; minimum TTL
+#    cat <<EOF | sudo tee /etc/bind/db.vpn.test
+#\$TTL 86400
+#@       IN      SOA     ns.vpn.test.  hostmaster.vpn.test. (
+#                        2025021801  ; version
+#                        86400       ; refresh
+#                        7200        ; retry
+#                        3600000     ; expire
+#                        86400 )     ; minimum TTL
 
-; Nameservers
-        IN      NS      ns.vpn.test.
+#; Nameservers
+#        IN      NS      ns.vpn.test.
 
-; Records
-        IN      A       $NETWORK.$web_index
-ns      IN      A       $NETWORK.1
+#; Records
+#        IN      A       $NETWORK.$web_index
+#ns      IN      A       $NETWORK.1
 
-; CNAME
-gitlab      IN  CNAME   vpn.test.
-www.gitlab  IN  CNAME   vpn.test.
-EOF
+#; CNAME
+#gitlab      IN  CNAME   vpn.test.
+#www.gitlab  IN  CNAME   vpn.test.
+#EOF
 
-    cat <<EOF | sudo tee /etc/bind/db.vpn.test.arpa
-\$TTL 86400
-@       IN      SOA     ns.vpn.test.  hostmaster.vpn.test. (
-                        2025021801  ; version
-                        86400       ; refresh
-                        7200        ; retry
-                        3600000     ; expire
-                        86400 )     ; minimum TTL
+#    cat <<EOF | sudo tee /etc/bind/db.vpn.test.arpa
+#\$TTL 86400
+#@       IN      SOA     ns.vpn.test.  hostmaster.vpn.test. (
+#                        2025021801  ; version
+#                        86400       ; refresh
+#                        7200        ; retry
+#                        3600000     ; expire
+#                        86400 )     ; minimum TTL
 
-; Namerservers
-        IN      NS      ns.vpn.test.
+#; Namerservers
+#        IN      NS      ns.vpn.test.
 
-; Resolve IP address to FQDN Pointers (PTR)
-$web_index       IN      PTR     vpn.test.
-1       IN      PTR     ns.vpn.test.
-EOF
-
-    cat <<EOF | sudo tee /etc/bind/named.conf.options
+#; Resolve IP address to FQDN Pointers (PTR)
+#$web_index       IN      PTR     vpn.test.
+#1       IN      PTR     ns.vpn.test.
+#EOF
+    
+    if [[ ! -f "/etc/bind/named.conf.options" ]]
+    then
+        cat <<EOF | sudo tee /etc/bind/named.conf.options
 // ACL names
 acl vpn-network { $NETWORK.0/$MASK; };
 options {
@@ -159,26 +172,27 @@ options {
     server-id none;
 };
 EOF
+    fi
 
-    cat <<EOF | sudo tee /etc/bind/named.conf.local
-//
-// Do any local configuration here
-//
+#    cat <<EOF | sudo tee /etc/bind/named.conf.local
+#//
+#// Do any local configuration here
+#//
 
-// Consider adding the 1918 zones here, if they are not used in your
-// organization
-//include "/etc/bind/zones.rfc1918";
+#// Consider adding the 1918 zones here, if they are not used in your
+#// organization
+#//include "/etc/bind/zones.rfc1918";
 
-zone "vpn.test" {
-    type master;
-    file "/etc/bind/db.vpn.test";
-};
+#zone "vpn.test" {
+#    type master;
+#    file "/etc/bind/db.vpn.test";
+#};
 
-zone "$MASK-$REV_NETWORK.in-addr.arpa" {
-    type master;
-    file "/etc/bind/db.vpn.test.arpa";
-};
-EOF
+#zone "$MASK-$REV_NETWORK.in-addr.arpa" {
+#    type master;
+#    file "/etc/bind/db.vpn.test.arpa";
+#};
+#EOF
 }
 
 initiation() {
@@ -187,5 +201,5 @@ initiation() {
 }
 
 prereq
-configuration "phone" "docker" "gitlab"
+configuration "phone" "docker" "gitlab" "test"
 initiation
