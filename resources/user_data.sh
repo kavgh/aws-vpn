@@ -2,11 +2,18 @@
 
 NETWORK="10.213.56"
 REV_NETWORK="56.213.10"
-MASK=29
+MASK=24
+
+is_sudo() {
+    if [[ -z $SUDO_USER ]]; then
+        echo "Must be run with sudo"
+        exit 1
+    fi
+}
 
 prereq() {
-    sudo apt-get update && sudo apt-get install -y wireguard bind9
-    sudo sed -i '/net.ipv4.ip_forward=1/s/#//' /etc/sysctl.conf && sudo sysctl -p
+    apt-get update && sudo apt-get install -y wireguard bind9
+    sed -i '/net.ipv4.ip_forward=1/s/#//' /etc/sysctl.conf && sudo sysctl -p
 }
 
 chmod() {
@@ -44,7 +51,7 @@ EOF
     chmod "/etc/wireguard/server_priv.key" "/etc/wireguard/server_pub.key" "/etc/wireguard/wg0.conf"
 
     index=2
-    gitlab web_index
+    #gitlab web_index
 
     for peer in "${peers[@]}"; do
 	if [[ ! -f "/etc/wireguard/peer_${peer}_priv.key" && ! -f "/etc/wireguard/peer_${peer}_pub.key" && ! -f "/etc/wireguard/peer_${peer}_psk.key" ]]
@@ -200,6 +207,7 @@ initiation() {
     sudo systemctl enable --now wg-quick@wg0
 }
 
+is_sudo
 prereq
-configuration "phone" "docker" "gitlab" "test"
+configuration "1" "2"
 initiation
